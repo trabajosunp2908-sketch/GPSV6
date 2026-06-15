@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+
+<title>Mi Mapa GPS</title>
+
+<link rel="stylesheet"
+href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+
+<style>
+
+html, body
+{
+    margin: 0;
+    height: 100%;
+}
+
+#map
+{
+    width: 100%;
+    height: 100%;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div id="info"
+     style="
+     position:absolute;
+     top:50px;
+     left:50px;
+     z-index:1000;
+     background:white;
+     padding:10px;
+     border:1px solid black;
+     border-radius:5px;
+     font-family:Arial;
+     font-size:24px;">
+Esperando GPS...
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+<script>
+
+// =====================
+// MAPA
+// =====================
+
+var map = L.map('map').setView([-14.0678, -75.7286], 13);
+
+L.tileLayer(
+'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+{
+    maxZoom: 25
+}).addTo(map);
+
+// =====================
+// VARIABLES
+// =====================
+
+var marcadorUsuario;
+var marcadorDestino;
+var lineaTrayectoria;
+
+var distanciaDestino = null;
+var rumboDestino = null;
+
+var orientacionTelefono = null;
+
+var ultimaLat = null;
+var ultimaLon = null;
+var ultimaPrecision = null;
+
+var mapaCentrado = false;
+
+// =====================
+// ICONO FLECHA SVG
+// =====================
+
+var iconoFlecha = L.divIcon({
+    className: '',
+    html: `
+    <div id="flechaUsuario"
+         style="
+         width:120px;
+         height:120px;
+         transform:rotate(0deg);
+         transform-origin:center center;
+         display:flex;
+         justify-content:center;
+         align-items:center;">
+
+        <svg
+            width="120"
+            height="120"
+            viewBox="0 0 120 120">
+
+            <!-- EJE X -->
+            <line
+                x1="10"
+                y1="60"
+                x2="110"
+                y2="60"
+                stroke="blue"
+                stroke-width="2"/>
+
+            <!-- EJE Y -->
+            <line
+                x1="60"
+                y1="10"
+                x2="60"
+                y2="110"
+                stroke="green"
+                stroke-width="2"/>
+
+            <!-- Etiquetas -->
+            <text x="112" y="65"
+                  font-size="12">X+</text>
+
+            <text x="0" y="65"
+                  font-size="12">X-</text>
+
+            <text x="55" y="12"
+                  font-size="12">Y+</text>
+
+            <text x="55" y="118"
+                  font-size="12">Y-</text>
+
+            <!-- Centro -->
+            <circle
+                cx="60"
+                cy="60"
+                r="4"
+                fill="black"/>
+
+            <!-- Flecha -->
+            <polygon
+                points="
+                60,5
+                75,40
+                60,30
+                45,40"
+                fill="red"
+                stroke="black"
+                stroke-width="1"/>
+
+        </svg>
+
+    </div>
+    `,
+    iconSize: [120,120],
+    iconAnchor: [60,60]
+});
+
+// =====================
+// INFO
+// =====================
+
+function actualizarInfo()
+{
+    if (ultimaLat === null)
+    {
+        return;
+    }
+
+    var textoInfo =
+    "<b>Mi Posición</b><br>" +
+    "Lat: " + ultimaLat.toFixed(6) + "<br>" +
+    "Lon: " + ultimaLon.toFixed(6) + "<br>" +
+    "Precisión: " +
+    Math.round(ultimaPrecision) +
+    " m";
+
+    if (orientacionTelefono !== null)
+    {
+        textoInfo +=
+        "<br><br>" +
+        "<b>Orientación</b><br>" +
+        orientacionTelefono.toFixed(1) +
+        "°";
+    }
+
+    if (distanciaDestino !== null)
+    {
+        textoInfo +=
+        "<br><br>" +
+        "<b>Navegación</b><br>" +
+        "Distancia: " +
+        distanciaDestino.toFixed(1) +
+        " m<br>" +
+        "Rumbo: " +
+        rumboDestino.toFixed(1) +
+        "°";
+    }
+
+    document.getElementById("info").innerHTML =
+    textoInfo;
+}
+
+// =====================
+// GPS
+// =====================
+
+navigator.geolocation.watchPosition(
+
+function(posicion)
+{
+    var lat = posicion.coords.latitude;
+    var lon = posicion.coords.longitude;
+    var precision = posicion.coords.accuracy;
+
+    if (precision > 60)
+    {
+        document.getElementById("info").innerHTML =
+        "GPS detectado<br>" +
+        "Precisión insuficiente: " +
+        Math.round(precision) +
+        " m";
+
+        return;
+    }
+
+    ultimaLat = lat;
+    ultimaLon = lon;
+    ultimaPrecision = precision;
+
+    if (!marcadorUsuario)
+    {
+        marcadorUsuario =
+        L.marker(
+            [lat, lon],
+            {
+                icon: iconoFlecha
+            }
+        ).addTo(map);
+
+        actualizarTrayectoria();
+    }
+    else
+    {
+        marcadorUsuario.setLatLng([lat, lon]);
+
+        actualizarTrayectoria();
+    }
+
+    actualizarInfo();
+
+    if (!mapaCentrado)
+    {
+        map.setView([lat, lon], 18);
+
+        mapaCentrado = true;
+    }
+},
+
+function(error)
+{
+    document.getElementById("info").innerHTML =
+    "Error GPS";
+},
+
+{
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 10000
+}
+
+);
+
+// =====================
+// DESTINO
+// =====================
+
+map.on('click', function(e)
+{
+    var latDestino = e.latlng.lat;
+    var lonDestino = e.latlng.lng;
+
+    if (!marcadorDestino)
+    {
+        marcadorDestino =
+        L.marker([latDestino, lonDestino])
+        .addTo(map)
+        .bindPopup("Destino");
+    }
+    else
+    {
+        marcadorDestino.setLatLng(
+            [latDestino, lonDestino]
+        );
+    }
+
+    actualizarTrayectoria();
+});
+
+// =====================
+// TRAYECTORIA
+// =====================
+
+function actualizarTrayectoria()
+{
+    if (!marcadorUsuario ||
+        !marcadorDestino)
+    {
+        return;
+    }
+
+    var origen =
+    marcadorUsuario.getLatLng();
+
+    var destino =
+    marcadorDestino.getLatLng();
+
+    distanciaDestino =
+    calcularDistancia(
+        origen.lat,
+        origen.lng,
+        destino.lat,
+        destino.lng
+    );
+
+    rumboDestino =
+    calcularRumbo(
+        origen.lat,
+        origen.lng,
+        destino.lat,
+        destino.lng
+    );
+
+    if (lineaTrayectoria)
+    {
+        map.removeLayer(
+            lineaTrayectoria
+        );
+    }
+
+    lineaTrayectoria =
+    L.polyline(
+        [
+            [origen.lat, origen.lng],
+            [destino.lat, destino.lng]
+        ],
+        {
+            weight: 2
+        }
+    ).addTo(map);
+
+    actualizarInfo();
+}
+
+// =====================
+// DISTANCIA
+// =====================
+
+function calcularDistancia(
+    lat1,
+    lon1,
+    lat2,
+    lon2
+)
+{
+    var R = 6371000;
+
+    var dLat =
+    (lat2 - lat1) *
+    Math.PI / 180;
+
+    var dLon =
+    (lon2 - lon1) *
+    Math.PI / 180;
+
+    var a =
+    Math.sin(dLat/2) *
+    Math.sin(dLat/2) +
+
+    Math.cos(
+        lat1 *
+        Math.PI/180
+    ) *
+
+    Math.cos(
+        lat2 *
+        Math.PI/180
+    ) *
+
+    Math.sin(dLon/2) *
+    Math.sin(dLon/2);
+
+    var c =
+    2 *
+    Math.atan2(
+        Math.sqrt(a),
+        Math.sqrt(1-a)
+    );
+
+    return R * c;
+}
+
+// =====================
+// RUMBO
+// =====================
+
+function calcularRumbo(
+    lat1,
+    lon1,
+    lat2,
+    lon2
+)
+{
+    var dLon =
+    (lon2 - lon1) *
+    Math.PI / 180;
+
+    lat1 =
+    lat1 *
+    Math.PI / 180;
+
+    lat2 =
+    lat2 *
+    Math.PI / 180;
+
+    var y =
+    Math.sin(dLon) *
+    Math.cos(lat2);
+
+    var x =
+    Math.cos(lat1) *
+    Math.sin(lat2) -
+
+    Math.sin(lat1) *
+    Math.cos(lat2) *
+    Math.cos(dLon);
+
+    var rumbo =
+    Math.atan2(y,x) *
+    180 / Math.PI;
+
+    return (rumbo + 360) % 360;
+}
+
+// =====================
+// ORIENTACIÓN
+// =====================
+
+if (window.DeviceOrientationEvent)
+{
+    window.addEventListener(
+        "deviceorientation",
+        function(event)
+        {
+            if (event.alpha !== null)
+            {
+                orientacionTelefono =
+                (360 - event.alpha) % 360;
+
+                var flecha =
+                document.getElementById(
+                    "flechaUsuario"
+                );
+
+                if (flecha)
+                {
+                    flecha.style.transform =
+                    "rotate(" +
+                    orientacionTelefono +
+                    "deg)";
+                }
+
+                actualizarInfo();
+            }
+        }
+    );
+}
+
+</script>
+
+</body>
+</html>
